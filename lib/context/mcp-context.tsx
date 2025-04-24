@@ -128,6 +128,7 @@ export function MCPProvider(props: {
     setSelectedMcpServersFromState,
     selectedMcpServersFromLocalStorage,
     setSelectedMcpServersFromLocalStorage,
+    gitMcpServer,
   ]);
 
   const [mcpServersForApi, setMcpServersForApi] = useState<MCPServerApi[]>([]);

@@ -45,6 +45,8 @@ interface MCPContextType {
   selectedMcpServers: string[];
   setSelectedMcpServers: (serverIds: string[]) => void;
   mcpServersForApi: MCPServerApi[];
+  owner: string;
+  repo: string | null;
 }
 
 const MCPContext = createContext<MCPContextType | undefined>(undefined);
@@ -163,6 +165,8 @@ export function MCPProvider(props: {
         selectedMcpServers,
         setSelectedMcpServers,
         mcpServersForApi,
+        owner,
+        repo,
       }}
     >
       {children}

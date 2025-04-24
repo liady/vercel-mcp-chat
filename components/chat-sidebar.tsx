@@ -23,6 +23,7 @@ import {
   SidebarMenuBadge,
   useSidebar,
   SidebarMenuSubItem,
+  SidebarSeparator,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,7 +88,7 @@ export function ChatSidebar() {
             </div>
             {!isCollapsed && (
               <div className="font-semibold text-lg text-foreground/90">
-                GitMCP
+                GitMCP Chat
               </div>
             )}
           </div>
@@ -95,15 +96,7 @@ export function ChatSidebar() {
       </SidebarHeader>
 
       <SidebarContent className="flex flex-col h-[calc(100vh-8rem)]">
-        <SidebarGroup className="flex-shrink-0">
-          <SidebarGroupLabel
-            className={cn(
-              "px-4 pt-0 text-xs font-medium text-muted-foreground/80 uppercase tracking-wider",
-              isCollapsed ? "sr-only" : ""
-            )}
-          >
-            MCP Servers
-          </SidebarGroupLabel>
+        <SidebarGroup className="flex-shrink-0 pl-0">
           <SidebarGroupContent>
             <SidebarMenu>
               <SidebarMenuItem>
@@ -113,7 +106,7 @@ export function ChatSidebar() {
                     "w-full flex items-center gap-2 transition-all",
                     "hover:bg-secondary/50 active:bg-secondary/70"
                   )}
-                  tooltip={isCollapsed ? "MCP Servers" : undefined}
+                  tooltip={isCollapsed ? "GitMCP Servers" : undefined}
                 >
                   <ServerIcon
                     className={cn(
@@ -125,7 +118,7 @@ export function ChatSidebar() {
                   />
                   {!isCollapsed && (
                     <span className="flex-grow text-sm text-foreground/80">
-                      MCP Servers
+                      GitMCP Servers
                     </span>
                   )}
                   {activeServersCount > 0 && !isCollapsed ? (
@@ -142,6 +135,7 @@ export function ChatSidebar() {
                   ) : null}
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              <div className="border-b border-border/40 w-full" />
               <SidebarMenuItem>
                 <SidebarMenuButton
                   onClick={() => setApiKeySettingsOpen(true)}
@@ -155,7 +149,9 @@ export function ChatSidebar() {
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  onClick={() => window.open("https://git.new/s-mcp", "_blank")}
+                  onClick={() =>
+                    window.open("https://git.new/gitmcp", "_blank")
+                  }
                   className="w-full flex items-center gap-2 transition-all hover:bg-secondary/50 active:bg-secondary/70"
                 >
                   <Github className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
@@ -181,6 +177,19 @@ export function ChatSidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter className="p-4 border-t border-border/40 mt-auto">
+        <div className="flex flex-col gap-4 items-center">
+          {!isCollapsed && (
+            <p className="text-xs text-muted-foreground">
+              Powered by{" "}
+              <a
+                href="git.new/s-mcp"
+                className="text-primary hover:text-primary/80"
+              >
+                Scira Chat
+              </a>
+            </p>
+          )}
+        </div>
         <MCPServerManager
           servers={mcpServers}
           onServersChange={setMcpServers}

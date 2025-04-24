@@ -14,26 +14,15 @@ import { Label } from "./ui/label";
 import {
   PlusCircle,
   ServerIcon,
-  X,
-  Terminal,
   Globe,
   ExternalLink,
   Trash2,
   CheckCircle,
-  Plus,
-  Cog,
   Edit2,
-  Eye,
-  EyeOff,
 } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "./ui/accordion";
-import { KeyValuePair, MCPServer } from "@/lib/context/mcp-context";
+import { MCPServer } from "@/lib/context/mcp-context";
+import { getRepoData } from "@/lib/utils";
 
 // Default template for a new MCP server
 const INITIAL_NEW_SERVER: Omit<MCPServer, "id"> = {
@@ -55,31 +44,6 @@ interface MCPServerManagerProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Check if a key name might contain sensitive information
-const isSensitiveKey = (key: string): boolean => {
-  const sensitivePatterns = [
-    /key/i,
-    /token/i,
-    /secret/i,
-    /password/i,
-    /pass/i,
-    /auth/i,
-    /credential/i,
-  ];
-  return sensitivePatterns.some((pattern) => pattern.test(key));
-};
-
-// Mask a sensitive value
-const maskValue = (value: string): string => {
-  if (!value) return "";
-  if (value.length < 8) return "••••••";
-  return (
-    value.substring(0, 3) +
-    "•".repeat(Math.min(10, value.length - 4)) +
-    value.substring(value.length - 1)
-  );
-};
-
 export const MCPServerManager = ({
   servers,
   onServersChange,
@@ -91,72 +55,47 @@ export const MCPServerManager = ({
   const [newServer, setNewServer] =
     useState<Omit<MCPServer, "id">>(INITIAL_NEW_SERVER);
   const [view, setView] = useState<"list" | "add">("list");
-  const [newEnvVar, setNewEnvVar] = useState<KeyValuePair>({
-    key: "",
-    value: "",
-  });
-  const [newHeader, setNewHeader] = useState<KeyValuePair>({
-    key: "",
-    value: "",
-  });
   const [editingServerId, setEditingServerId] = useState<string | null>(null);
-  const [showSensitiveEnvValues, setShowSensitiveEnvValues] = useState<
-    Record<number, boolean>
-  >({});
-  const [showSensitiveHeaderValues, setShowSensitiveHeaderValues] = useState<
-    Record<number, boolean>
-  >({});
-  const [editingEnvIndex, setEditingEnvIndex] = useState<number | null>(null);
-  const [editingHeaderIndex, setEditingHeaderIndex] = useState<number | null>(
-    null
-  );
-  const [editedEnvValue, setEditedEnvValue] = useState<string>("");
-  const [editedHeaderValue, setEditedHeaderValue] = useState<string>("");
 
   const resetAndClose = () => {
     setView("list");
     setNewServer(INITIAL_NEW_SERVER);
-    setNewEnvVar({ key: "", value: "" });
-    setNewHeader({ key: "", value: "" });
-    setShowSensitiveEnvValues({});
-    setShowSensitiveHeaderValues({});
-    setEditingEnvIndex(null);
-    setEditingHeaderIndex(null);
     onOpenChange(false);
   };
 
-  const addServer = () => {
-    if (!newServer.name) {
-      toast.error("Server name is required");
-      return;
+  const generateServerFromUrl = (url: string): MCPServer | null => {
+    if (!url) {
+      toast.error("Server URL is required");
+      return null;
     }
 
-    if (newServer.type === "sse" && !newServer.url) {
-      toast.error("Server URL is required for SSE transport");
-      return;
+    const { owner, repo } = getRepoData(url);
+
+    if (!owner || (owner != "docs" && !repo)) {
+      toast.error("Invalid server URL");
+      return null;
     }
 
-    if (
-      newServer.type === "stdio" &&
-      (!newServer.command || !newServer.args?.length)
-    ) {
-      toast.error(
-        "Command and at least one argument are required for stdio transport"
-      );
-      return;
-    }
+    const newUrl = ["https://gitmcp.io", owner, repo].filter(Boolean).join("/");
+
+    const name = repo ? `${repo} Docs` : "MCP Docs";
 
     const id = crypto.randomUUID();
-    const updatedServers = [...servers, { ...newServer, id }];
+
+    return { id, name, url: newUrl, type: "sse" } as const;
+  };
+
+  const addServer = () => {
+    const newServerToAdd = generateServerFromUrl(newServer.url);
+    if (!newServerToAdd) {
+      return;
+    }
+    const updatedServers = [...servers, newServerToAdd];
     onServersChange(updatedServers);
 
-    toast.success(`Added MCP server: ${newServer.name}`);
+    toast.success(`Added MCP server: ${newServerToAdd.name}`);
     setView("list");
     setNewServer(INITIAL_NEW_SERVER);
-    setNewEnvVar({ key: "", value: "" });
-    setNewHeader({ key: "", value: "" });
-    setShowSensitiveEnvValues({});
-    setShowSensitiveHeaderValues({});
   };
 
   const removeServer = (id: string, e: React.MouseEvent) => {
@@ -202,129 +141,6 @@ export const MCPServerManager = ({
     }
   };
 
-  const handleArgsChange = (value: string) => {
-    try {
-      // Try to parse as JSON if it starts with [ (array)
-      const argsArray = value.trim().startsWith("[")
-        ? JSON.parse(value)
-        : value.split(" ").filter(Boolean);
-
-      setNewServer({ ...newServer, args: argsArray });
-    } catch (error) {
-      // If parsing fails, just split by spaces
-      setNewServer({ ...newServer, args: value.split(" ").filter(Boolean) });
-    }
-  };
-
-  const addEnvVar = () => {
-    if (!newEnvVar.key) return;
-
-    setNewServer({
-      ...newServer,
-      env: [...(newServer.env || []), { ...newEnvVar }],
-    });
-
-    setNewEnvVar({ key: "", value: "" });
-  };
-
-  const removeEnvVar = (index: number) => {
-    const updatedEnv = [...(newServer.env || [])];
-    updatedEnv.splice(index, 1);
-    setNewServer({ ...newServer, env: updatedEnv });
-
-    // Clean up visibility state for this index
-    const updatedVisibility = { ...showSensitiveEnvValues };
-    delete updatedVisibility[index];
-    setShowSensitiveEnvValues(updatedVisibility);
-
-    // If currently editing this value, cancel editing
-    if (editingEnvIndex === index) {
-      setEditingEnvIndex(null);
-    }
-  };
-
-  const startEditEnvValue = (index: number, value: string) => {
-    setEditingEnvIndex(index);
-    setEditedEnvValue(value);
-  };
-
-  const saveEditedEnvValue = () => {
-    if (editingEnvIndex !== null) {
-      const updatedEnv = [...(newServer.env || [])];
-      updatedEnv[editingEnvIndex] = {
-        ...updatedEnv[editingEnvIndex],
-        value: editedEnvValue,
-      };
-      setNewServer({ ...newServer, env: updatedEnv });
-      setEditingEnvIndex(null);
-    }
-  };
-
-  const addHeader = () => {
-    if (!newHeader.key) return;
-
-    setNewServer({
-      ...newServer,
-      headers: [...(newServer.headers || []), { ...newHeader }],
-    });
-
-    setNewHeader({ key: "", value: "" });
-  };
-
-  const removeHeader = (index: number) => {
-    const updatedHeaders = [...(newServer.headers || [])];
-    updatedHeaders.splice(index, 1);
-    setNewServer({ ...newServer, headers: updatedHeaders });
-
-    // Clean up visibility state for this index
-    const updatedVisibility = { ...showSensitiveHeaderValues };
-    delete updatedVisibility[index];
-    setShowSensitiveHeaderValues(updatedVisibility);
-
-    // If currently editing this value, cancel editing
-    if (editingHeaderIndex === index) {
-      setEditingHeaderIndex(null);
-    }
-  };
-
-  const startEditHeaderValue = (index: number, value: string) => {
-    setEditingHeaderIndex(index);
-    setEditedHeaderValue(value);
-  };
-
-  const saveEditedHeaderValue = () => {
-    if (editingHeaderIndex !== null) {
-      const updatedHeaders = [...(newServer.headers || [])];
-      updatedHeaders[editingHeaderIndex] = {
-        ...updatedHeaders[editingHeaderIndex],
-        value: editedHeaderValue,
-      };
-      setNewServer({ ...newServer, headers: updatedHeaders });
-      setEditingHeaderIndex(null);
-    }
-  };
-
-  const toggleSensitiveEnvValue = (index: number) => {
-    setShowSensitiveEnvValues((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
-  };
-
-  const toggleSensitiveHeaderValue = (index: number) => {
-    setShowSensitiveHeaderValues((prev) => ({
-      ...prev,
-      [index]: !prev[index],
-    }));
-  };
-
-  const hasAdvancedConfig = (server: MCPServer) => {
-    return (
-      (server.env && server.env.length > 0) ||
-      (server.headers && server.headers.length > 0)
-    );
-  };
-
   // Editing support
   const startEditing = (server: MCPServer) => {
     setEditingServerId(server.id);
@@ -338,11 +154,6 @@ export const MCPServerManager = ({
       headers: server.headers,
     });
     setView("add");
-    // Reset sensitive value visibility states
-    setShowSensitiveEnvValues({});
-    setShowSensitiveHeaderValues({});
-    setEditingEnvIndex(null);
-    setEditingHeaderIndex(null);
   };
 
   const handleFormCancel = () => {
@@ -350,43 +161,26 @@ export const MCPServerManager = ({
       setView("list");
       setEditingServerId(null);
       setNewServer(INITIAL_NEW_SERVER);
-      setShowSensitiveEnvValues({});
-      setShowSensitiveHeaderValues({});
-      setEditingEnvIndex(null);
-      setEditingHeaderIndex(null);
     } else {
       resetAndClose();
     }
   };
 
   const updateServer = () => {
-    if (!newServer.name) {
-      toast.error("Server name is required");
-      return;
-    }
-    if (newServer.type === "sse" && !newServer.url) {
-      toast.error("Server URL is required for SSE transport");
-      return;
-    }
-    if (
-      newServer.type === "stdio" &&
-      (!newServer.command || !newServer.args?.length)
-    ) {
-      toast.error(
-        "Command and at least one argument are required for stdio transport"
-      );
+    const newServerToUpdate = generateServerFromUrl(newServer.url);
+    if (!newServerToUpdate) {
       return;
     }
     const updated = servers.map((s) =>
-      s.id === editingServerId ? { ...newServer, id: editingServerId! } : s
+      s.id === editingServerId
+        ? { ...newServerToUpdate, id: editingServerId! }
+        : s
     );
     onServersChange(updated);
-    toast.success(`Updated MCP server: ${newServer.name}`);
+    toast.success(`Updated MCP server: ${newServerToUpdate.name}`);
     setView("list");
     setEditingServerId(null);
     setNewServer(INITIAL_NEW_SERVER);
-    setShowSensitiveEnvValues({});
-    setShowSensitiveHeaderValues({});
   };
 
   return (
@@ -395,11 +189,13 @@ export const MCPServerManager = ({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <ServerIcon className="h-5 w-5 text-primary" />
-            MCP Server Configuration
+            {view == "list"
+              ? "MCP Server Configuration"
+              : editingServerId
+              ? "Edit GitMCP Server"
+              : "Add New GitMCP Server"}
           </DialogTitle>
           <DialogDescription>
-            Connect to Model Context Protocol servers to access additional AI
-            tools.
             {selectedServers.length > 0 && (
               <span className="block mt-1 text-xs font-medium text-primary">
                 {selectedServers.length} server
@@ -438,7 +234,6 @@ export const MCPServerManager = ({
                             isActive={isActive}
                             removeServer={removeServer}
                             startEditing={startEditing}
-                            hasAdvancedConfig={hasAdvancedConfig}
                             toggleServer={toggleServer}
                           />
                         );
@@ -475,455 +270,23 @@ export const MCPServerManager = ({
           </div>
         ) : (
           <div className="space-y-4 overflow-y-auto px-1 py-0.5 mb-14 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-            <h3 className="text-sm font-medium">
-              {editingServerId ? "Edit MCP Server" : "Add New MCP Server"}
-            </h3>
             <div className="space-y-4">
               <div className="grid gap-1.5">
-                <Label htmlFor="name">Server Name</Label>
+                <Label htmlFor="url">Server or Repository URL</Label>
                 <Input
-                  id="name"
-                  value={newServer.name}
+                  id="url"
+                  value={newServer.url}
                   onChange={(e) =>
-                    setNewServer({ ...newServer, name: e.target.value })
+                    setNewServer({ ...newServer, url: e.target.value })
                   }
-                  placeholder="My MCP Server"
+                  placeholder="https://gitmcp.io/microsoft/playwright-mcp"
                   className="relative z-0"
                 />
+                <p className="text-xs text-muted-foreground">
+                  A gitmcp.io server, a github.com repository, or a github.io
+                  pages site
+                </p>
               </div>
-
-              <div className="grid gap-1.5">
-                <Label htmlFor="transport-type">Transport Type</Label>
-                <div className="space-y-2">
-                  <p className="text-xs text-muted-foreground">
-                    Choose how to connect to your MCP server:
-                  </p>
-                  <div className="grid gap-2 grid-cols-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setNewServer({ ...newServer, type: "sse" })
-                      }
-                      className={`flex items-center gap-2 p-3 rounded-md text-left border transition-all ${
-                        newServer.type === "sse"
-                          ? "border-primary bg-primary/10 ring-1 ring-primary"
-                          : "border-border hover:border-border/80 hover:bg-muted/50"
-                      }`}
-                    >
-                      <Globe
-                        className={`h-5 w-5 shrink-0 ${
-                          newServer.type === "sse" ? "text-primary" : ""
-                        }`}
-                      />
-                      <div>
-                        <p className="font-medium">SSE</p>
-                        <p className="text-xs text-muted-foreground">
-                          Server-Sent Events
-                        </p>
-                      </div>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setNewServer({ ...newServer, type: "stdio" })
-                      }
-                      className={`flex items-center gap-2 p-3 rounded-md text-left border transition-all ${
-                        newServer.type === "stdio"
-                          ? "border-primary bg-primary/10 ring-1 ring-primary"
-                          : "border-border hover:border-border/80 hover:bg-muted/50"
-                      }`}
-                    >
-                      <Terminal
-                        className={`h-5 w-5 shrink-0 ${
-                          newServer.type === "stdio" ? "text-primary" : ""
-                        }`}
-                      />
-                      <div>
-                        <p className="font-medium">stdio</p>
-                        <p className="text-xs text-muted-foreground">
-                          Standard I/O
-                        </p>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {newServer.type === "sse" ? (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="url">Server URL</Label>
-                  <Input
-                    id="url"
-                    value={newServer.url}
-                    onChange={(e) =>
-                      setNewServer({ ...newServer, url: e.target.value })
-                    }
-                    placeholder="https://mcp.example.com/token/sse"
-                    className="relative z-0"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Full URL to the SSE endpoint of the MCP server
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="command">Command</Label>
-                    <Input
-                      id="command"
-                      value={newServer.command}
-                      onChange={(e) =>
-                        setNewServer({ ...newServer, command: e.target.value })
-                      }
-                      placeholder="node"
-                      className="relative z-0"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Executable to run (e.g., node, python)
-                    </p>
-                  </div>
-                  <div className="grid gap-1.5">
-                    <Label htmlFor="args">Arguments</Label>
-                    <Input
-                      id="args"
-                      value={newServer.args?.join(" ") || ""}
-                      onChange={(e) => handleArgsChange(e.target.value)}
-                      placeholder="src/mcp-server.js --port 3001"
-                      className="relative z-0"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Space-separated arguments or JSON array
-                    </p>
-                  </div>
-                </>
-              )}
-
-              {/* Advanced Configuration */}
-              <Accordion type="single" collapsible className="w-full">
-                <AccordionItem value="env-vars">
-                  <AccordionTrigger className="text-sm py-2">
-                    Environment Variables
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="space-y-3">
-                      <div className="flex items-end gap-2">
-                        <div className="flex-1">
-                          <Label
-                            htmlFor="env-key"
-                            className="text-xs mb-1 block"
-                          >
-                            Key
-                          </Label>
-                          <Input
-                            id="env-key"
-                            value={newEnvVar.key}
-                            onChange={(e) =>
-                              setNewEnvVar({
-                                ...newEnvVar,
-                                key: e.target.value,
-                              })
-                            }
-                            placeholder="API_KEY"
-                            className="h-8 relative z-0"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <Label
-                            htmlFor="env-value"
-                            className="text-xs mb-1 block"
-                          >
-                            Value
-                          </Label>
-                          <Input
-                            id="env-value"
-                            value={newEnvVar.value}
-                            onChange={(e) =>
-                              setNewEnvVar({
-                                ...newEnvVar,
-                                value: e.target.value,
-                              })
-                            }
-                            placeholder="your-secret-key"
-                            className="h-8 relative z-0"
-                            type="text"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={addEnvVar}
-                          disabled={!newEnvVar.key}
-                          className="h-8 mt-1"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-
-                      {newServer.env && newServer.env.length > 0 ? (
-                        <div className="border rounded-md divide-y">
-                          {newServer.env.map((env, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center justify-between p-2 text-sm"
-                            >
-                              <div className="flex-1 flex items-center gap-1 truncate">
-                                <span className="font-mono text-xs">
-                                  {env.key}
-                                </span>
-                                <span className="mx-2 text-muted-foreground">
-                                  =
-                                </span>
-
-                                {editingEnvIndex === index ? (
-                                  <div className="flex gap-1 flex-1">
-                                    <Input
-                                      className="h-6 text-xs py-1 px-2"
-                                      value={editedEnvValue}
-                                      onChange={(e) =>
-                                        setEditedEnvValue(e.target.value)
-                                      }
-                                      onKeyDown={(e) =>
-                                        e.key === "Enter" &&
-                                        saveEditedEnvValue()
-                                      }
-                                      autoFocus
-                                    />
-                                    <Button
-                                      size="sm"
-                                      className="h-6 px-2"
-                                      onClick={saveEditedEnvValue}
-                                    >
-                                      Save
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <span className="text-xs text-muted-foreground truncate">
-                                      {isSensitiveKey(env.key) &&
-                                      !showSensitiveEnvValues[index]
-                                        ? maskValue(env.value)
-                                        : env.value}
-                                    </span>
-                                    <span className="flex ml-1 gap-1">
-                                      {isSensitiveKey(env.key) && (
-                                        <button
-                                          onClick={() =>
-                                            toggleSensitiveEnvValue(index)
-                                          }
-                                          className="p-1 hover:bg-muted/50 rounded-full"
-                                        >
-                                          {showSensitiveEnvValues[index] ? (
-                                            <EyeOff className="h-3 w-3 text-muted-foreground" />
-                                          ) : (
-                                            <Eye className="h-3 w-3 text-muted-foreground" />
-                                          )}
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() =>
-                                          startEditEnvValue(index, env.value)
-                                        }
-                                        className="p-1 hover:bg-muted/50 rounded-full"
-                                      >
-                                        <Edit2 className="h-3 w-3 text-muted-foreground" />
-                                      </button>
-                                    </span>
-                                  </>
-                                )}
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeEnvVar(index)}
-                                className="h-6 w-6 p-0 ml-2"
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground text-center py-2">
-                          No environment variables added
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        Environment variables will be passed to the MCP server
-                        process.
-                      </p>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-
-                <AccordionItem value="headers">
-                  <AccordionTrigger className="text-sm py-2">
-                    {newServer.type === "sse"
-                      ? "HTTP Headers"
-                      : "Additional Configuration"}
-                  </AccordionTrigger>
-                  <AccordionContent>
-                    <div className="space-y-3">
-                      <div className="flex items-end gap-2">
-                        <div className="flex-1">
-                          <Label
-                            htmlFor="header-key"
-                            className="text-xs mb-1 block"
-                          >
-                            Key
-                          </Label>
-                          <Input
-                            id="header-key"
-                            value={newHeader.key}
-                            onChange={(e) =>
-                              setNewHeader({
-                                ...newHeader,
-                                key: e.target.value,
-                              })
-                            }
-                            placeholder="Authorization"
-                            className="h-8 relative z-0"
-                          />
-                        </div>
-                        <div className="flex-1">
-                          <Label
-                            htmlFor="header-value"
-                            className="text-xs mb-1 block"
-                          >
-                            Value
-                          </Label>
-                          <Input
-                            id="header-value"
-                            value={newHeader.value}
-                            onChange={(e) =>
-                              setNewHeader({
-                                ...newHeader,
-                                value: e.target.value,
-                              })
-                            }
-                            placeholder="Bearer token123"
-                            className="h-8 relative z-0"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={addHeader}
-                          disabled={!newHeader.key}
-                          className="h-8 mt-1"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-
-                      {newServer.headers && newServer.headers.length > 0 ? (
-                        <div className="border rounded-md divide-y">
-                          {newServer.headers.map((header, index) => (
-                            <div
-                              key={index}
-                              className="flex items-center justify-between p-2 text-sm"
-                            >
-                              <div className="flex-1 flex items-center gap-1 truncate">
-                                <span className="font-mono text-xs">
-                                  {header.key}
-                                </span>
-                                <span className="mx-2 text-muted-foreground">
-                                  :
-                                </span>
-
-                                {editingHeaderIndex === index ? (
-                                  <div className="flex gap-1 flex-1">
-                                    <Input
-                                      className="h-6 text-xs py-1 px-2"
-                                      value={editedHeaderValue}
-                                      onChange={(e) =>
-                                        setEditedHeaderValue(e.target.value)
-                                      }
-                                      onKeyDown={(e) =>
-                                        e.key === "Enter" &&
-                                        saveEditedHeaderValue()
-                                      }
-                                      autoFocus
-                                    />
-                                    <Button
-                                      size="sm"
-                                      className="h-6 px-2"
-                                      onClick={saveEditedHeaderValue}
-                                    >
-                                      Save
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <>
-                                    <span className="text-xs text-muted-foreground truncate">
-                                      {isSensitiveKey(header.key) &&
-                                      !showSensitiveHeaderValues[index]
-                                        ? maskValue(header.value)
-                                        : header.value}
-                                    </span>
-                                    <span className="flex ml-1 gap-1">
-                                      {isSensitiveKey(header.key) && (
-                                        <button
-                                          onClick={() =>
-                                            toggleSensitiveHeaderValue(index)
-                                          }
-                                          className="p-1 hover:bg-muted/50 rounded-full"
-                                        >
-                                          {showSensitiveHeaderValues[index] ? (
-                                            <EyeOff className="h-3 w-3 text-muted-foreground" />
-                                          ) : (
-                                            <Eye className="h-3 w-3 text-muted-foreground" />
-                                          )}
-                                        </button>
-                                      )}
-                                      <button
-                                        onClick={() =>
-                                          startEditHeaderValue(
-                                            index,
-                                            header.value
-                                          )
-                                        }
-                                        className="p-1 hover:bg-muted/50 rounded-full"
-                                      >
-                                        <Edit2 className="h-3 w-3 text-muted-foreground" />
-                                      </button>
-                                    </span>
-                                  </>
-                                )}
-                              </div>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => removeHeader(index)}
-                                className="h-6 w-6 p-0 ml-2"
-                              >
-                                <X className="h-3 w-3" />
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs text-muted-foreground text-center py-2">
-                          No{" "}
-                          {newServer.type === "sse"
-                            ? "headers"
-                            : "additional configuration"}{" "}
-                          added
-                        </p>
-                      )}
-                      <p className="text-xs text-muted-foreground">
-                        {newServer.type === "sse"
-                          ? "HTTP headers will be sent with requests to the SSE endpoint."
-                          : "Additional configuration parameters for the stdio transport."}
-                      </p>
-                    </div>
-                  </AccordionContent>
-                </AccordionItem>
-              </Accordion>
             </div>
           </div>
         )}
@@ -932,16 +295,7 @@ export const MCPServerManager = ({
         <div className="absolute bottom-0 left-0 right-0 p-4 bg-background border-t border-border flex justify-between z-10">
           {view === "list" ? (
             <>
-              <Button
-                variant="outline"
-                onClick={clearAllServers}
-                size="sm"
-                className="gap-1.5 hover:text-black hover:dark:text-white"
-                disabled={selectedServers.length === 0}
-              >
-                <X className="h-3.5 w-3.5" />
-                Disable All
-              </Button>
+              <span></span>
               <Button
                 onClick={() => setView("add")}
                 size="sm"
@@ -958,12 +312,7 @@ export const MCPServerManager = ({
               </Button>
               <Button
                 onClick={editingServerId ? updateServer : addServer}
-                disabled={
-                  !newServer.name ||
-                  (newServer.type === "sse" && !newServer.url) ||
-                  (newServer.type === "stdio" &&
-                    (!newServer.command || !newServer.args?.length))
-                }
+                disabled={!newServer.url}
               >
                 {editingServerId ? "Save Changes" : "Add Server"}
               </Button>
@@ -980,14 +329,12 @@ function McpServerListItem({
   isActive,
   removeServer,
   startEditing,
-  hasAdvancedConfig,
   toggleServer,
 }: {
   server: MCPServer;
   isActive: boolean;
   removeServer: (id: string, e: React.MouseEvent) => void;
   startEditing: (server: MCPServer) => void;
-  hasAdvancedConfig: (server: MCPServer) => boolean | undefined;
   toggleServer: (id: string) => void;
 }) {
   return (
@@ -1005,27 +352,15 @@ border ${
       {/* Server Header with Type Badge and Delete Button */}
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
-          {server.type === "sse" ? (
-            <Globe
-              className={`h-4 w-4 ${
-                isActive ? "text-primary" : "text-muted-foreground"
-              } flex-shrink-0`}
-            />
-          ) : (
-            <Terminal
-              className={`h-4 w-4 ${
-                isActive ? "text-primary" : "text-muted-foreground"
-              } flex-shrink-0`}
-            />
-          )}
+          <Globe
+            className={`h-4 w-4 ${
+              isActive ? "text-primary" : "text-muted-foreground"
+            } flex-shrink-0`}
+          />
+
           <h4 className="text-sm font-medium truncate max-w-[220px]">
             {server.name}
           </h4>
-          {hasAdvancedConfig(server) && (
-            <span className="flex-shrink-0">
-              <Cog className="h-3 w-3 text-muted-foreground" />
-            </span>
-          )}
         </div>
         <div className="flex items-center gap-2">
           <span className="text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
